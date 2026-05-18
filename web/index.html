@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Workout Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="header">
+    <h1>Workout Dashboard</h1>
+    <p class="subtitle" id="date-range">Loading…</p>
+    <div class="header-controls">
+      <label class="year-picker">
+        Year
+        <select id="year-select"></select>
+      </label>
+      <button class="nerd-toggle" id="nerd-toggle" type="button" aria-pressed="false">
+        For nerds
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel" id="year-review">
+      <h2>Year in review</h2>
+      <div class="stats-grid" id="stats-grid"></div>
+
+      <div class="nerd-only nerd-note">
+        <strong>How these are calculated</strong>
+        <ul>
+          <li><code>Volume = Σ(weight_lbs × reps)</code> across every set.</li>
+          <li><code>Volume (tons) = volume_lbs / 2000</code>.</li>
+          <li><code>Time in gym = end_time − start_time</code>, summed per session.</li>
+          <li><code>Longest streak</code> = longest run of consecutive calendar days with ≥ 1 logged session.</li>
+          <li><code>Top exercise</code> = exercise with the most logged sets in the selected year.</li>
+        </ul>
+      </div>
+
+      <div class="two-col">
+        <div>
+          <h3>Top lifts (max weight)</h3>
+          <ul class="pr-list" id="pr-list"></ul>
+        </div>
+        <div>
+          <h3>Monthly sessions</h3>
+          <div class="month-bars" id="month-bars"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Activity heatmap</h2>
+      <div class="heatmap-wrap">
+        <div class="heatmap-labels" id="heatmap-months"></div>
+        <div class="heatmap-grid" id="heatmap-grid"></div>
+      </div>
+      <div class="legend">
+        <span>Less</span>
+        <span class="cell l0"></span>
+        <span class="cell l1"></span>
+        <span class="cell l2"></span>
+        <span class="cell l3"></span>
+        <span class="cell l4"></span>
+        <span>More</span>
+      </div>
+      <div class="nerd-only nerd-note">
+        <strong>How heat levels are bucketed</strong>
+        <p>For the selected year, each day's volume is divided by that year's
+        highest-volume day, then bucketed into quartiles:</p>
+        <ul>
+          <li><code>L1</code> &lt; 25%, <code>L2</code> &lt; 50%, <code>L3</code> &lt; 75%, <code>L4</code> ≥ 75% of the year's peak.</li>
+          <li>Rest days render as <code>L0</code>.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="panel" id="chat-panel">
+      <h2>Ask your data <span class="badge">LLM</span></h2>
+      <p class="subtitle" id="chat-status">Powered by a local Ollama model — your data stays on this machine.</p>
+      <div class="chip-row" id="chat-chips"></div>
+      <div class="chat-history" id="chat-history" aria-live="polite"></div>
+      <form class="chat-form" id="chat-form" autocomplete="off">
+        <textarea
+          id="chat-input"
+          placeholder="Ask about your workouts… (Shift+Enter for newline)"
+          rows="2"
+          required
+        ></textarea>
+        <button type="submit" id="chat-send">Ask</button>
+      </form>
+      <div class="nerd-only nerd-note" id="chat-nerd"></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

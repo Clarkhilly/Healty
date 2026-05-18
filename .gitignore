@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Generated artifacts
+data.db
+data.db-journal
+*.sqlite
+*.sqlite3
+fatigue_output/
+
+# Personal workout data (kept local-only)
+workout_data.csv
+
+# Environment / secrets (never commit these)
+.env
+.env.*
+*.pem
+*.key
+
+# IDE / editor
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
