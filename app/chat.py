@@ -49,8 +49,8 @@ TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "overall_summary",
             "description": "High-level totals across the entire workout log: "
-                           "date range, total sessions, total sets, total volume, "
-                           "unique exercise count.",
+                           "log_first_date / log_last_date (ISO), total sessions, "
+                           "sets, volume, unique exercises.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -59,8 +59,8 @@ TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "schedule_summary",
             "description": "Workout schedule for the most recent N weeks: sessions, "
-                           "sessions-per-week, average rest days, longest rest gap, "
-                           "and a Mon-Sun day-of-week breakdown.",
+                           "sessions-per-week, rest gaps, Mon–Sun breakdown, plus "
+                           "window_start_date / window_end_date and log_last_date.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -73,10 +73,8 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "muscle_group_volume",
-            "description": "Volume and set counts grouped by muscle group "
-                           "(chest, back, shoulders, biceps, triceps, legs, calves, "
-                           "core, cardio) for the most recent N weeks. Use for "
-                           "overtraining / imbalance questions.",
+            "description": "Volume and sets by muscle group for the most recent N weeks. "
+                           "Includes window_start_date / window_end_date and log span.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -89,8 +87,8 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "exercise_progression",
-            "description": "Per-session weight, reps, and volume for a single exercise "
-                           "over the last N weeks. Use for progression / stalled-lift questions.",
+            "description": "Per-day stats for one exercise over the last N weeks (each "
+                           "trend[].date is ISO). Includes window bounds and log span.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -105,7 +103,8 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "top_exercises",
-            "description": "Most-trained exercises overall, ranked by 'sets' or 'volume'.",
+            "description": "Most-trained exercises, ranked by sets or volume. Each row "
+                           "has last_workout_date (ISO). Includes log span.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -119,7 +118,8 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "personal_records",
-            "description": "Heaviest weight ever lifted per exercise.",
+            "description": "Heaviest weight per exercise with achieved_on (latest ISO "
+                           "date at that max weight). Includes log span.",
             "parameters": {
                 "type": "object",
                 "properties": {"limit": {"type": "integer", "default": 10}},
@@ -130,8 +130,8 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "recent_sessions",
-            "description": "The N most recent workout sessions with date, duration, "
-                           "volume, and set count.",
+            "description": "The N most recent sessions: each date is ISO. Includes "
+                           "log_first_date / log_last_date.",
             "parameters": {
                 "type": "object",
                 "properties": {"limit": {"type": "integer", "default": 10}},
@@ -142,8 +142,9 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "compare_periods",
-            "description": "Compare the last N weeks vs the N weeks before that "
-                           "(sessions, volume, sets, minutes) with pct deltas.",
+            "description": "Compare two back-to-back windows of N weeks: each period "
+                           "has window_first_date / window_last_date (actual session "
+                           "bounds), plus split_on_date and log span.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -156,7 +157,8 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "list_exercises",
-            "description": "Every exercise in the log with its muscle group and set count.",
+            "description": "All exercises with set counts; each has last_workout_date. "
+                           "Includes log span.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -181,13 +183,17 @@ workout log. Talk to them like a friend who happens to know lifting — direct, 
 specific, no filler.
 
 Hard rules:
+- Reference date = log_last_date from tools = latest workout in their log, not \
+today's calendar date. Every tool returns log_first_date / log_last_date \
+(ISO YYYY-MM-DD) when data exists. Windowed tools also return explicit \
+window_* dates; compare_periods uses split_on_date between recent vs prior. \
+Quote those strings exactly when you mention time ranges.
 - Never invent numbers, dates, percentages, or exercise names. Call a tool \
 first; if it errors, retry with different args or a different tool. Don't \
 make things up.
 - Stay in your lane. Programming (volume, frequency, balance, progression) is \
 yours. Pain, injuries, nutrition, supplements, body comp — defer: "that's a \
 physio/RD question, not mine."
-- Reference date = the most recent workout in their log, not today.
 
 How to answer:
 - Lead with the verdict in the first sentence. No "Great question," no \

@@ -1,3 +1,5 @@
+"""Aggregations for the dashboard: heatmap levels and year-in-review metrics."""
+
 import sqlite3
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -73,25 +75,39 @@ def year_in_review(year: int) -> dict:
 
     sessions = _rows(
         conn,
-        "SELECT * FROM sessions WHERE workout_date LIKE ? ORDER BY workout_date",
+        """
+        SELECT workout_date, title, duration_min,
+               total_volume, total_sets, total_miles
+        FROM sessions
+        WHERE workout_date LIKE ?
+        ORDER BY workout_date
+        """,
         (prefix,),
     )
     if not sessions:
         conn.close()
         return {"year": year, "has_data": False}
 
-    total_sessions = len(sessions)
-    total_sets = sum(s["total_sets"] for s in sessions)
-    total_volume = sum(s["total_volume"] or 0 for s in sessions)
-    total_miles = sum(s["total_miles"] or 0 for s in sessions)
-    total_minutes = sum(s["duration_min"] or 0 for s in sessions)
-
-    by_month = defaultdict(lambda: {"sessions": 0, "volume": 0})
+    total_sets = 0
+    total_volume = 0.0
+    total_miles = 0.0
+    total_minutes = 0.0
+    by_month: dict[str, dict[str, float]] = defaultdict(lambda: {"sessions": 0, "volume": 0})
+    title_counts: dict[str, int] = defaultdict(int)
+    dates: list[str] = []
     for s in sessions:
+        total_sets += s["total_sets"] or 0
+        vol = s["total_volume"] or 0
+        total_volume += vol
+        total_miles += s["total_miles"] or 0
+        total_minutes += s["duration_min"] or 0
         month = s["workout_date"][:7]
         by_month[month]["sessions"] += 1
-        by_month[month]["volume"] += s["total_volume"] or 0
+        by_month[month]["volume"] += vol
+        title_counts[s["title"]] += 1
+        dates.append(s["workout_date"])
 
+    total_sessions = len(sessions)
     busiest_month = max(by_month.items(), key=lambda x: x[1]["sessions"])
 
     exercise_sets = _rows(
@@ -119,17 +135,14 @@ def year_in_review(year: int) -> dict:
         GROUP BY exercise_title
         HAVING max_weight > 0
         ORDER BY max_weight DESC
-        LIMIT 10
+        LIMIT 8
         """,
         (prefix,),
     )
 
-    title_counts = defaultdict(int)
-    for s in sessions:
-        title_counts[s["title"]] += 1
     favorite_time = max(title_counts.items(), key=lambda x: x[1])[0] if title_counts else None
 
-    streak = _longest_streak([s["workout_date"] for s in sessions])
+    streak = _longest_streak(dates)
 
     conn.close()
 
@@ -158,7 +171,7 @@ def year_in_review(year: int) -> dict:
                 "max_weight_lbs": p["max_weight"],
                 "best_set_volume": round(p["max_set_volume"] or 0),
             }
-            for p in prs[:8]
+            for p in prs
         ],
         "months": [
             {"month": m, **by_month[m]}
@@ -170,12 +183,10 @@ def year_in_review(year: int) -> dict:
 def _longest_streak(dates: list[str]) -> int:
     if not dates:
         return 0
-    unique = sorted(set(dates))
+    parsed = sorted({datetime.strptime(d, "%Y-%m-%d").date() for d in dates})
     best = cur = 1
-    for i in range(1, len(unique)):
-        prev = datetime.strptime(unique[i - 1], "%Y-%m-%d").date()
-        curr = datetime.strptime(unique[i], "%Y-%m-%d").date()
-        if curr - prev == timedelta(days=1):
+    for prev, curr in zip(parsed, parsed[1:]):
+        if (curr - prev) == timedelta(days=1):
             cur += 1
             best = max(best, cur)
         else:

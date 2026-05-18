@@ -3,6 +3,10 @@
 Each public function returns a dict of small, JSON-safe scalars / lists that
 the model can quote back at the user. Everything is SELECT-only; the LLM can
 never write to the DB.
+
+Every payload includes log_first_date / log_last_date (ISO YYYY-MM-DD from
+sessions, or null if empty) so answers anchor on exact log dates, not the
+real-world calendar.
 """
 
 from collections import defaultdict
@@ -89,16 +93,24 @@ def _round(x, n=1):
     return None if x is None else round(float(x), n)
 
 
+def _log_span(conn) -> dict[str, str | None]:
+    row = conn.execute(
+        "SELECT MIN(workout_date) AS a, MAX(workout_date) AS b FROM sessions",
+    ).fetchone()
+    if not row or row["a"] is None:
+        return {"log_first_date": None, "log_last_date": None}
+    return {"log_first_date": row["a"], "log_last_date": row["b"]}
+
+
 # ─────────────────────────────────────────────
 #  Public tools
 # ─────────────────────────────────────────────
 def overall_summary() -> dict:
     conn = get_connection()
+    span = _log_span(conn)
     s = conn.execute(
         """
         SELECT COUNT(*) AS sessions,
-               MIN(workout_date) AS first_date,
-               MAX(workout_date) AS last_date,
                SUM(total_volume) AS volume,
                SUM(total_sets)   AS sets
         FROM sessions
@@ -107,8 +119,7 @@ def overall_summary() -> dict:
     exercises = conn.execute("SELECT COUNT(DISTINCT exercise_title) AS n FROM sets").fetchone()
     conn.close()
     return {
-        "first_date":      s["first_date"],
-        "last_date":       s["last_date"],
+        **span,
         "total_sessions":  int(s["sessions"] or 0),
         "total_sets":      int(s["sets"] or 0),
         "total_volume_lb": _round(s["volume"], 0),
@@ -118,6 +129,7 @@ def overall_summary() -> dict:
 
 def schedule_summary(weeks: int = 4) -> dict:
     conn = get_connection()
+    span = _log_span(conn)
     start = _window_start(conn, weeks)
     rows = conn.execute(
         """
@@ -131,25 +143,31 @@ def schedule_summary(weeks: int = 4) -> dict:
     conn.close()
 
     if not rows:
-        return {"weeks": weeks, "sessions": 0, "note": "No sessions in this window."}
+        return {
+            **span,
+            "weeks": weeks,
+            "window_filter_from_date": start,
+            "sessions": 0,
+            "note": "No sessions in this window.",
+        }
 
-    dates = sorted({r["workout_date"] for r in rows})
-    day_counts = defaultdict(int)
-    for r in rows:
-        d = datetime.strptime(r["workout_date"], "%Y-%m-%d").date()
+    parsed = [datetime.strptime(r["workout_date"], "%Y-%m-%d").date() for r in rows]
+    unique_dates = sorted(set(parsed))
+
+    day_counts: dict[str, int] = defaultdict(int)
+    for d in parsed:
         day_counts[d.strftime("%a")] += 1
+
     durations = [r["duration_min"] for r in rows if r["duration_min"]]
 
-    gaps = []
-    for i in range(1, len(dates)):
-        a = datetime.strptime(dates[i - 1], "%Y-%m-%d").date()
-        b = datetime.strptime(dates[i], "%Y-%m-%d").date()
-        gaps.append((b - a).days)
+    gaps = [(b - a).days for a, b in zip(unique_dates, unique_dates[1:])]
 
     return {
+        **span,
         "weeks": weeks,
-        "window_start": dates[0],
-        "window_end":   dates[-1],
+        "window_filter_from_date": start,
+        "window_start_date": unique_dates[0].strftime("%Y-%m-%d"),
+        "window_end_date": unique_dates[-1].strftime("%Y-%m-%d"),
         "sessions":     len(rows),
         "sessions_per_week": _round(len(rows) / max(weeks, 1), 2),
         "avg_rest_days_between": _round(sum(gaps) / len(gaps), 1) if gaps else None,
@@ -164,7 +182,12 @@ def schedule_summary(weeks: int = 4) -> dict:
 
 def muscle_group_volume(weeks: int = 4) -> dict:
     conn = get_connection()
+    span = _log_span(conn)
     start = _window_start(conn, weeks)
+    window_end_row = conn.execute(
+        "SELECT MAX(workout_date) AS d FROM sets WHERE workout_date >= ?",
+        (start,),
+    ).fetchone()
     rows = conn.execute(
         """
         SELECT exercise_title, COUNT(*) AS sets, SUM(volume) AS volume
@@ -198,11 +221,18 @@ def muscle_group_volume(weeks: int = 4) -> dict:
         })
     groups.sort(key=lambda g: g["volume_lb"] or 0, reverse=True)
 
-    return {"weeks": weeks, "window_start": start, "groups": groups}
+    return {
+        **span,
+        "weeks": weeks,
+        "window_start_date": start,
+        "window_end_date": window_end_row["d"],
+        "groups": groups,
+    }
 
 
 def exercise_progression(exercise: str, weeks: int = 12) -> dict:
     conn = get_connection()
+    span = _log_span(conn)
     start = _window_start(conn, weeks)
     rows = conn.execute(
         """
@@ -222,7 +252,15 @@ def exercise_progression(exercise: str, weeks: int = 12) -> dict:
     conn.close()
 
     if not rows:
-        return {"exercise": exercise, "weeks": weeks, "sessions": 0, "note": "No data in window."}
+        return {
+            **span,
+            "exercise": exercise,
+            "weeks": weeks,
+            "window_start_date": start,
+            "window_end_date": None,
+            "sessions": 0,
+            "note": "No data in window.",
+        }
 
     sessions = [
         {
@@ -243,9 +281,12 @@ def exercise_progression(exercise: str, weeks: int = 12) -> dict:
     )
 
     return {
+        **span,
         "exercise":   exercise,
         "weeks":      weeks,
         "muscle_group": muscle_group(exercise),
+        "window_start_date": start,
+        "window_end_date": last["date"],
         "sessions":   len(sessions),
         "first":      first,
         "last":       last,
@@ -256,13 +297,15 @@ def exercise_progression(exercise: str, weeks: int = 12) -> dict:
 
 def top_exercises(limit: int = 10, by: str = "sets") -> dict:
     conn = get_connection()
+    span = _log_span(conn)
     order_col = "volume" if by == "volume" else "sets"
     rows = conn.execute(
         f"""
         SELECT exercise_title,
                COUNT(*)    AS sets,
                SUM(volume) AS volume,
-               MAX(weight_lbs) AS max_weight
+               MAX(weight_lbs) AS max_weight,
+               MAX(workout_date) AS last_workout_date
         FROM sets
         GROUP BY exercise_title
         ORDER BY {order_col} DESC
@@ -272,6 +315,7 @@ def top_exercises(limit: int = 10, by: str = "sets") -> dict:
     ).fetchall()
     conn.close()
     return {
+        **span,
         "by": by,
         "exercises": [
             {
@@ -280,6 +324,7 @@ def top_exercises(limit: int = 10, by: str = "sets") -> dict:
                 "sets":         int(r["sets"]),
                 "volume_lb":    _round(r["volume"], 0),
                 "max_weight_lb": _round(r["max_weight"], 1),
+                "last_workout_date": r["last_workout_date"],
             }
             for r in rows
         ],
@@ -288,36 +333,54 @@ def top_exercises(limit: int = 10, by: str = "sets") -> dict:
 
 def personal_records(limit: int = 10) -> dict:
     conn = get_connection()
+    span = _log_span(conn)
     rows = conn.execute(
         """
-        SELECT exercise_title,
-               MAX(weight_lbs) AS max_weight,
-               MAX(volume)     AS best_set_volume
-        FROM sets
-        WHERE weight_lbs IS NOT NULL AND reps IS NOT NULL
-        GROUP BY exercise_title
-        HAVING max_weight > 0
-        ORDER BY max_weight DESC
+        SELECT x.exercise_title AS exercise_title,
+               x.max_weight AS max_weight,
+               x.best_set_volume AS best_set_volume,
+               (
+                 SELECT workout_date FROM sets y
+                 WHERE y.exercise_title = x.exercise_title
+                   AND y.weight_lbs = x.max_weight
+                   AND y.reps IS NOT NULL
+                   AND y.weight_lbs IS NOT NULL
+                 ORDER BY workout_date DESC
+                 LIMIT 1
+               ) AS achieved_on
+        FROM (
+          SELECT exercise_title,
+                 MAX(weight_lbs) AS max_weight,
+                 MAX(volume) AS best_set_volume
+          FROM sets
+          WHERE weight_lbs IS NOT NULL AND reps IS NOT NULL
+          GROUP BY exercise_title
+          HAVING max_weight > 0
+        ) AS x
+        ORDER BY x.max_weight DESC
         LIMIT ?
         """,
         (limit,),
     ).fetchall()
     conn.close()
     return {
+        **span,
         "records": [
             {
                 "exercise":     r["exercise_title"],
                 "muscle_group": muscle_group(r["exercise_title"]),
                 "max_weight_lb": _round(r["max_weight"], 1),
                 "best_set_volume_lb": _round(r["best_set_volume"], 0),
+                "achieved_on": r["achieved_on"],
             }
             for r in rows
-        ]
+        ],
     }
 
 
 def recent_sessions(limit: int = 10) -> dict:
     conn = get_connection()
+    span = _log_span(conn)
     rows = conn.execute(
         """
         SELECT workout_date, title, duration_min, total_volume, total_sets, exercise_count
@@ -329,6 +392,7 @@ def recent_sessions(limit: int = 10) -> dict:
     ).fetchall()
     conn.close()
     return {
+        **span,
         "sessions": [
             {
                 "date":     r["workout_date"],
@@ -345,41 +409,63 @@ def recent_sessions(limit: int = 10) -> dict:
 
 def compare_periods(period_weeks: int = 4) -> dict:
     conn = get_connection()
+    span = _log_span(conn)
     end = _latest_workout_date(conn)
     mid = end - timedelta(weeks=period_weeks)
     start = end - timedelta(weeks=period_weeks * 2)
 
-    def _stats(window_start, window_end):
-        row = conn.execute(
-            """
-            SELECT COUNT(*) AS sessions,
-                   SUM(total_volume) AS volume,
-                   SUM(total_sets)   AS sets,
-                   SUM(duration_min) AS minutes
-            FROM sessions
-            WHERE workout_date > ? AND workout_date <= ?
-            """,
-            (window_start.strftime("%Y-%m-%d"), window_end.strftime("%Y-%m-%d")),
-        ).fetchone()
+    start_s = start.strftime("%Y-%m-%d")
+    mid_s   = mid.strftime("%Y-%m-%d")
+    end_s   = end.strftime("%Y-%m-%d")
+
+    # One pass over the union of both windows; CASE buckets each row into
+    # `recent` (mid, end] or `prior` (start, mid]. Saves three round-trips
+    # vs. the previous "two _stats() calls × (aggregate + bounds)" shape.
+    row = conn.execute(
+        """
+        SELECT
+          SUM(CASE WHEN workout_date >  :mid   AND workout_date <= :end THEN 1            ELSE 0 END) AS r_sessions,
+          SUM(CASE WHEN workout_date >  :mid   AND workout_date <= :end THEN total_volume ELSE 0 END) AS r_volume,
+          SUM(CASE WHEN workout_date >  :mid   AND workout_date <= :end THEN total_sets   ELSE 0 END) AS r_sets,
+          SUM(CASE WHEN workout_date >  :mid   AND workout_date <= :end THEN duration_min ELSE 0 END) AS r_minutes,
+          MIN(CASE WHEN workout_date >  :mid   AND workout_date <= :end THEN workout_date END)        AS r_first,
+          MAX(CASE WHEN workout_date >  :mid   AND workout_date <= :end THEN workout_date END)        AS r_last,
+          SUM(CASE WHEN workout_date >  :start AND workout_date <= :mid THEN 1            ELSE 0 END) AS p_sessions,
+          SUM(CASE WHEN workout_date >  :start AND workout_date <= :mid THEN total_volume ELSE 0 END) AS p_volume,
+          SUM(CASE WHEN workout_date >  :start AND workout_date <= :mid THEN total_sets   ELSE 0 END) AS p_sets,
+          SUM(CASE WHEN workout_date >  :start AND workout_date <= :mid THEN duration_min ELSE 0 END) AS p_minutes,
+          MIN(CASE WHEN workout_date >  :start AND workout_date <= :mid THEN workout_date END)        AS p_first,
+          MAX(CASE WHEN workout_date >  :start AND workout_date <= :mid THEN workout_date END)        AS p_last
+        FROM sessions
+        WHERE workout_date > :start AND workout_date <= :end
+        """,
+        {"start": start_s, "mid": mid_s, "end": end_s},
+    ).fetchone()
+    conn.close()
+
+    def _bucket(prefix: str) -> dict:
         return {
-            "sessions": int(row["sessions"] or 0),
-            "volume_lb": _round(row["volume"], 0),
-            "sets":     int(row["sets"] or 0),
-            "minutes":  _round(row["minutes"], 0),
+            "sessions":  int(row[f"{prefix}_sessions"] or 0),
+            "volume_lb": _round(row[f"{prefix}_volume"], 0),
+            "sets":      int(row[f"{prefix}_sets"] or 0),
+            "minutes":   _round(row[f"{prefix}_minutes"], 0),
+            "window_first_date": row[f"{prefix}_first"],
+            "window_last_date":  row[f"{prefix}_last"],
         }
 
-    recent = _stats(mid, end)
-    prior  = _stats(start, mid)
-    conn.close()
+    recent = _bucket("r")
+    prior  = _bucket("p")
 
     def _delta(a, b):
         if not b: return None
         return _round(100 * (a - b) / b, 1)
 
     return {
+        **span,
         "period_weeks": period_weeks,
-        "recent": {**recent, "window_end": end.strftime("%Y-%m-%d")},
-        "prior":  {**prior,  "window_end": mid.strftime("%Y-%m-%d")},
+        "split_on_date": mid_s,
+        "recent": recent,
+        "prior": prior,
         "deltas_pct": {
             "sessions": _delta(recent["sessions"], prior["sessions"]),
             "volume":   _delta(recent["volume_lb"] or 0, prior["volume_lb"] or 0),
@@ -391,9 +477,10 @@ def compare_periods(period_weeks: int = 4) -> dict:
 
 def list_exercises() -> dict:
     conn = get_connection()
+    span = _log_span(conn)
     rows = conn.execute(
         """
-        SELECT exercise_title, COUNT(*) AS sets
+        SELECT exercise_title, COUNT(*) AS sets, MAX(workout_date) AS last_workout_date
         FROM sets
         GROUP BY exercise_title
         ORDER BY exercise_title
@@ -401,12 +488,14 @@ def list_exercises() -> dict:
     ).fetchall()
     conn.close()
     return {
+        **span,
         "exercises": [
             {
                 "exercise":     r["exercise_title"],
                 "muscle_group": muscle_group(r["exercise_title"]),
                 "sets":         int(r["sets"]),
+                "last_workout_date": r["last_workout_date"],
             }
             for r in rows
-        ]
+        ],
     }

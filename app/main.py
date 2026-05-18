@@ -1,3 +1,5 @@
+"""FastAPI application: REST + static dashboard, SQLite init on startup."""
+
 from contextlib import asynccontextmanager
 from pathlib import Path
 

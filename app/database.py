@@ -1,3 +1,5 @@
+"""SQLite storage: schema, connections, and loading `workout_data.csv` into `data.db`."""
+
 import sqlite3
 from pathlib import Path
 

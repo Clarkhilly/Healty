@@ -266,17 +266,18 @@ function renderChatNerdNote() {
     <strong>How the chat works</strong>
     <ol>
       <li>Your question is sent to <code>POST /api/chat</code>.</li>
-      <li>FastAPI passes it to a local Ollama model (default
-        <code>llama3.1:8b-instruct-q4_K_M</code>, configurable via the
-        <code>OLLAMA_MODEL</code> env var).</li>
-      <li>The model can call any of ~8 read-only "tools" against your
-        SQLite DB — schedule summary, muscle-group volume, exercise
-        progression, period comparison, etc.</li>
-      <li>The model gets the tool results back and writes a natural-language
-        answer. No data ever leaves your machine.</li>
+      <li>FastAPI forwards it to a local Ollama model (default
+        <code>qwen2.5:7b-instruct-q4_K_M</code>; override with
+        <code>OLLAMA_MODEL</code>, host with <code>OLLAMA_HOST</code>).</li>
+      <li>Each tool response includes <code>log_first_date</code> /
+        <code>log_last_date</code> (YYYY-MM-DD) plus explicit window bounds where
+        relevant, so the model can cite real dates from your log — not today’s
+        calendar.</li>
+      <li>Tool results are fed back to the model; the response is plain text /
+        light Markdown. Nothing is sent to a cloud LLM.</li>
     </ol>
-    <p>If responses feel slow, switch to the 3B model:
-       <code>OLLAMA_MODEL=llama3.2:3b-instruct-q4_K_M ./run.sh</code>.</p>`;
+    <p>For weaker hardware (faster, rougher tool use), try:
+       <code>OLLAMA_MODEL=qwen2.5:3b-instruct-q4_K_M ./run.sh</code>.</p>`;
 }
 
 async function loadYear(year) {
