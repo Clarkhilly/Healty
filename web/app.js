@@ -284,21 +284,13 @@ function renderChatNerdNote() {
   chatNerd.innerHTML = `
     <strong>How the chat works</strong>
     <ol>
-      <li>Your question is sent to <code>POST /api/chat</code>.</li>
-      <li>FastAPI forwards it to a local Ollama model (default
-        <code>qwen2.5:7b-instruct-q4_K_M</code>; override with
-        <code>OLLAMA_MODEL</code>, host with <code>OLLAMA_HOST</code>).</li>
-      <li>Each tool response includes <code>log_first_date</code> /
-        <code>log_last_date</code> (YYYY-MM-DD) plus explicit window bounds where
-        relevant, so the model can cite real dates from your log — not today’s
-        calendar.</li>
-      <li>Tool results are fed back to the model; the response is plain text /
-        light Markdown. Nothing is sent to a cloud LLM.</li>
-      <li>The <strong>About you</strong> panel writes <code>user_profile</code>; those fields
-        are injected into the system prompt each turn so the model can personalize without
-        a tool call.</li>
+      <li>Your question goes to <code>POST /api/chat</code>, which forwards it
+        to a local Ollama model (default <code>qwen2.5:7b-instruct-q4_K_M</code>;
+        override with <code>OLLAMA_MODEL</code> / <code>OLLAMA_HOST</code>).</li>
+      <li>The model calls the read/write tools as needed, gets their results,
+        and replies as plain text. Nothing ever leaves this machine.</li>
     </ol>
-    <p>For weaker hardware (faster, rougher tool use), try:
+    <p>If the 7B model feels slow on your hardware, try the 3B:
        <code>OLLAMA_MODEL=qwen2.5:3b-instruct-q4_K_M ./run.sh</code>.</p>`;
 }
 

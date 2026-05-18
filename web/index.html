@@ -103,19 +103,15 @@
           <li>iPhone Health app's "Export All Health Data" produces
               <code>export.xml</code> (often 500MB+). Drop it at
               <code>apple_health_export/export.xml</code>.</li>
-          <li><code>app/apple_health.py</code> streams it with
-              <code>xml.etree.ElementTree.iterparse</code> (constant memory)
-              and writes three SQLite tables: <code>health_workouts</code>,
+          <li>Parsed into three SQLite tables: <code>health_workouts</code>,
               <code>health_metric_samples</code> (weight / RHR / HRV / BMI),
-              and <code>health_daily</code> (per-day sums of steps, kcal,
-              walking distance, flights).</li>
-          <li>Strength sessions Hevy double-writes into Apple Health are
-              imported but filtered from the cardio view via
-              <code>source NOT IN ('Hevy', 'Strong', …)</code> so they don't
-              count twice against your lifting tables.</li>
-          <li>The chat tools <code>cardio_summary</code>,
-              <code>body_metric_trend</code>, and <code>daily_activity</code>
-              expose this data to the LLM.</li>
+              and <code>health_daily</code> (per-day steps, kcal, walking
+              distance, flights).</li>
+          <li>Lifting sessions that Hevy double-writes to Apple Health are
+              filtered out of the cardio view (<code>source NOT IN ('Hevy',
+              'Strong', …)</code>) so they don't count twice.</li>
+          <li>Exposed to the chat as <code>cardio_summary</code>,
+              <code>body_metric_trend</code>, and <code>daily_activity</code>.</li>
         </ul>
       </div>
     </section>
@@ -157,15 +153,10 @@
       </form>
       <div class="nerd-only nerd-note">
         <strong>How this reaches the model</strong>
-        <ul>
-          <li>Stored in SQLite <code>user_profile</code> (single row). <code>GET /api/profile</code>
-              and <code>PUT /api/profile</code> mirror this form.</li>
-          <li>On every <code>POST /api/chat</code>, non-empty fields are concatenated into the
-              system prompt (see <code>app/profile.py</code> / <code>app/chat.py</code>), alongside
-              your saved routine summary if you have one.</li>
-          <li>Planned calendar sessions are unchanged: the chat agent still uses
-              <code>schedule_workout</code>; they are just not listed in a dashboard panel.</li>
-        </ul>
+        <p>Non-empty fields get appended to the chat agent's system prompt on
+           every turn, so it can tailor advice without making a tool call.
+           Stored in SQLite (<code>user_profile</code>, single row) —
+           see <code>app/profile.py</code>.</p>
       </div>
     </section>
 
@@ -179,20 +170,15 @@
       <div class="nerd-only nerd-note">
         <strong>Routine vs Planned</strong>
         <ul>
-          <li><strong>Routine</strong> = reusable weekly template (Push A / Pull A /
-              Legs A…) with no calendar dates. One slot per user, stored in the
-              <code>routine</code> table (single row, id = 1).</li>
-          <li><strong>Planned</strong> = specific dated sessions for the upcoming week(s).
-              Built from the routine by calling <code>schedule_workout</code> per day.</li>
-          <li>Chat tools:
-              <code>save_routine(name, sessions)</code> overwrites this slot;
-              <code>get_routine()</code> reads it (the model uses this before applying
-              the routine to the calendar); <code>clear_routine()</code> wipes it.
-              Surfaced via <code>GET /api/routine</code> and
-              <code>DELETE /api/routine</code>.</li>
-          <li>The active routine name + session titles are injected into the system
-              prompt every turn, so the model can apply it consistently on follow-ups
-              like "now schedule next week".</li>
+          <li><strong>Routine</strong> = a reusable weekly template (Push A /
+              Pull A / Legs A…) with no dates. One slot, stored in the
+              <code>routine</code> table.</li>
+          <li><strong>Planned</strong> = specific dated sessions, built from
+              the routine when the agent calls <code>schedule_workout</code>
+              for each day.</li>
+          <li>The routine name + session titles are injected into the system
+              prompt every turn, so follow-ups like <em>"now schedule next
+              week from it"</em> stay consistent.</li>
         </ul>
       </div>
     </section>

@@ -44,4 +44,5 @@ export_cda.xml
 Thumbs.db
 
 # Logs
+DEV_NOTES.md
 *.log
