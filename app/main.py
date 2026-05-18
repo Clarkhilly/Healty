@@ -12,6 +12,7 @@ from app import apple_health as apple_mod
 from app import chat as chat_mod
 from app import insights
 from app import planning
+from app import profile as profile_mod
 from app import routines
 from app import stats
 from app.database import init_db
@@ -20,6 +21,13 @@ from app.database import init_db
 class ChatRequest(BaseModel):
     question: str
     history: list[dict] | None = None
+
+
+class ProfileUpdate(BaseModel):
+    age: int | None = None
+    sex: str | None = None
+    years_trained: float | None = None
+    notes: str | None = None
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = ROOT / "web"
@@ -88,6 +96,21 @@ def get_routine() -> dict:
 @app.delete("/api/routine")
 def clear_routine() -> dict:
     return routines.clear_routine()
+
+
+@app.get("/api/profile")
+def get_profile() -> dict:
+    return profile_mod.get_profile()
+
+
+@app.put("/api/profile")
+def put_profile(body: ProfileUpdate) -> dict:
+    return profile_mod.save_profile(
+        age=body.age,
+        sex=body.sex,
+        years_trained=body.years_trained,
+        notes=body.notes,
+    )
 
 
 @app.get("/api/planned")

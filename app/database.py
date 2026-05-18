@@ -124,6 +124,18 @@ CREATE TABLE IF NOT EXISTS planned_workouts (
     UNIQUE(planned_date, title)
 );
 CREATE INDEX IF NOT EXISTS idx_pw_date ON planned_workouts(planned_date);
+
+-- ── Self-reported user profile (for chat personalization) ────────────────
+-- One row (id = 1). Filled from the dashboard; injected into the LLM system
+-- prompt. Not derived from Hevy or Apple Health exports.
+CREATE TABLE IF NOT EXISTS user_profile (
+    id              INTEGER PRIMARY KEY,
+    age             INTEGER,
+    sex             TEXT,
+    years_trained   REAL,
+    notes           TEXT,
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
 """
 
 

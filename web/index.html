@@ -120,26 +120,51 @@
       </div>
     </section>
 
-    <section class="panel" id="planned-panel">
+    <section class="panel" id="profile-panel">
       <div class="panel-head">
-        <h2>Planned <span class="badge">agent</span></h2>
-        <button type="button" id="planned-clear" class="nerd-toggle">Clear all</button>
+        <h2>About you <span class="badge">chat</span></h2>
+        <button type="button" id="profile-save" class="nerd-toggle">Save</button>
       </div>
-      <p class="subtitle" id="planned-status">No upcoming sessions yet. Ask the chat to build a program.</p>
-      <div id="planned-list" class="planned-list"></div>
+      <p class="subtitle" id="profile-status">
+        Optional basics that are not in your Hevy or Apple Health export. Saved here and
+        added to the coach’s instructions each time you chat.
+      </p>
+      <form class="profile-form" id="profile-form" autocomplete="on">
+        <div class="profile-grid">
+          <label class="profile-field">
+            <span>Age</span>
+            <input type="number" id="profile-age" name="age" min="13" max="120" placeholder="—" />
+          </label>
+          <label class="profile-field">
+            <span>Sex</span>
+            <select id="profile-sex" name="sex">
+              <option value="">—</option>
+              <option value="female">Female</option>
+              <option value="male">Male</option>
+              <option value="non-binary">Non-binary</option>
+              <option value="prefer not to say">Prefer not to say</option>
+            </select>
+          </label>
+          <label class="profile-field">
+            <span>Years training</span>
+            <input type="number" id="profile-years" name="years_trained" min="0" max="80" step="0.5" placeholder="—" />
+          </label>
+        </div>
+        <label class="profile-field profile-field-full">
+          <span>Anything else (optional)</span>
+          <textarea id="profile-notes" name="notes" rows="2" maxlength="2000" placeholder="Goals, schedule quirks, equipment…"></textarea>
+        </label>
+      </form>
       <div class="nerd-only nerd-note">
-        <strong>How planning works</strong>
+        <strong>How this reaches the model</strong>
         <ul>
-          <li>The chat tool <code>schedule_workout(date, title, exercises)</code> is the
-              app's first <em>write</em> tool. The LLM calls it once per session when you
-              ask for a program. UPSERTs on <code>(date, title)</code>, so re-planning the
-              same day is idempotent.</li>
-          <li>Stored in the <code>planned_workouts</code> table (date, title, JSON exercise
-              list, status). Exposed via <code>GET /api/planned?days_ahead=14</code> and
-              <code>DELETE /api/planned</code>.</li>
-          <li>Read-only sibling tools: <code>list_planned_workouts</code> lets the model
-              check existing plans before adding new ones; <code>clear_planned_workouts</code>
-              lets it wipe a window before re-planning.</li>
+          <li>Stored in SQLite <code>user_profile</code> (single row). <code>GET /api/profile</code>
+              and <code>PUT /api/profile</code> mirror this form.</li>
+          <li>On every <code>POST /api/chat</code>, non-empty fields are concatenated into the
+              system prompt (see <code>app/profile.py</code> / <code>app/chat.py</code>), alongside
+              your saved routine summary if you have one.</li>
+          <li>Planned calendar sessions are unchanged: the chat agent still uses
+              <code>schedule_workout</code>; they are just not listed in a dashboard panel.</li>
         </ul>
       </div>
     </section>

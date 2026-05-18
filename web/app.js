@@ -25,9 +25,13 @@ const routineStatus = document.getElementById("routine-status");
 const routineDisplay = document.getElementById("routine-display");
 const routineClearBtn = document.getElementById("routine-clear");
 
-const plannedStatus = document.getElementById("planned-status");
-const plannedList = document.getElementById("planned-list");
-const plannedClearBtn = document.getElementById("planned-clear");
+const profileForm = document.getElementById("profile-form");
+const profileAge = document.getElementById("profile-age");
+const profileSex = document.getElementById("profile-sex");
+const profileYears = document.getElementById("profile-years");
+const profileNotes = document.getElementById("profile-notes");
+const profileStatus = document.getElementById("profile-status");
+const profileSaveBtn = document.getElementById("profile-save");
 
 const NERD_STORAGE_KEY = "nerd-mode";
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -290,6 +294,9 @@ function renderChatNerdNote() {
         calendar.</li>
       <li>Tool results are fed back to the model; the response is plain text /
         light Markdown. Nothing is sent to a cloud LLM.</li>
+      <li>The <strong>About you</strong> panel writes <code>user_profile</code>; those fields
+        are injected into the system prompt each turn so the model can personalize without
+        a tool call.</li>
     </ol>
     <p>For weaker hardware (faster, rougher tool use), try:
        <code>OLLAMA_MODEL=qwen2.5:3b-instruct-q4_K_M ./run.sh</code>.</p>`;
@@ -501,7 +508,6 @@ async function clearRoutine() {
   }
 }
 
-// ── Planned workouts (LLM-scheduled) ────────────────────────────────────
 function formatExerciseLine(ex) {
   if (typeof ex === "string") return escapeHtml(ex);
   const parts = [`<strong>${escapeHtml(ex.name || "")}</strong>`];
@@ -514,50 +520,70 @@ function formatExerciseLine(ex) {
   return parts.join(" ");
 }
 
-function renderPlanned(payload) {
-  const items = payload?.planned || [];
-  if (items.length === 0) {
-    plannedStatus.textContent = "No upcoming sessions. Ask the chat to build a program.";
-    plannedList.innerHTML = "";
-    return;
-  }
-  plannedStatus.textContent =
-    `${items.length} planned session${items.length === 1 ? "" : "s"} through ${payload.window_end_date}`;
-  plannedList.innerHTML = items
-    .map((s) => `
-      <div class="planned-card">
-        <div class="planned-card-head">
-          <span class="planned-date">${escapeHtml(s.date)}</span>
-          <span class="planned-title">${escapeHtml(s.title)}</span>
-        </div>
-        ${s.notes ? `<p class="planned-notes">${escapeHtml(s.notes)}</p>` : ""}
-        <ul class="planned-exercises">
-          ${(s.exercises || []).map((ex) => `<li>${formatExerciseLine(ex)}</li>`).join("")}
-        </ul>
-      </div>`)
-    .join("");
+function parseOptionalInt(el) {
+  const v = (el.value || "").trim();
+  if (!v) return null;
+  const n = parseInt(v, 10);
+  return Number.isNaN(n) ? null : n;
 }
 
-async function loadPlanned() {
+function parseOptionalFloat(el) {
+  const v = (el.value || "").trim();
+  if (!v) return null;
+  const n = parseFloat(v);
+  return Number.isNaN(n) ? null : n;
+}
+
+function applyProfileToForm(p) {
+  profileAge.value = p.age != null ? String(p.age) : "";
+  profileSex.value = p.sex || "";
+  profileYears.value = p.years_trained != null ? String(p.years_trained) : "";
+  profileNotes.value = p.notes || "";
+}
+
+async function loadProfile() {
+  const baseSubtitle =
+    "Optional basics that are not in your Hevy or Apple Health export. Saved here and " +
+    "added to the coach’s instructions each time you chat.";
   try {
-    const p = await fetchJson("/api/planned?days_ahead=21");
-    renderPlanned(p);
+    const p = await fetchJson("/api/profile");
+    applyProfileToForm(p);
+    if (p.has_any && p.updated_at) {
+      profileStatus.textContent = `${baseSubtitle} Last saved ${p.updated_at}.`;
+    } else {
+      profileStatus.textContent = baseSubtitle;
+    }
   } catch (err) {
-    plannedStatus.textContent = `Couldn't load planned workouts: ${err.message}`;
-    plannedList.innerHTML = "";
+    profileStatus.textContent = `Couldn't load profile: ${err.message}`;
   }
 }
 
-async function clearPlanned() {
-  if (!confirm("Delete all planned workouts?")) return;
-  plannedClearBtn.disabled = true;
+async function saveProfile() {
+  profileSaveBtn.disabled = true;
+  const body = {
+    age: parseOptionalInt(profileAge),
+    sex: (profileSex.value || "").trim() || null,
+    years_trained: parseOptionalFloat(profileYears),
+    notes: (profileNotes.value || "").trim() || null,
+  };
   try {
-    await fetchJson("/api/planned", { method: "DELETE" });
-    await loadPlanned();
+    const r = await fetchJson("/api/profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (r.ok === false) {
+      profileStatus.textContent = r.error || "Save failed.";
+      return;
+    }
+    applyProfileToForm(r);
+    profileStatus.textContent =
+      "Saved. The chat will use this on your next message." +
+      (r.updated_at ? ` (${r.updated_at})` : "");
   } catch (err) {
-    plannedStatus.textContent = `Clear failed: ${err.message}`;
+    profileStatus.textContent = `Save failed: ${err.message}`;
   } finally {
-    plannedClearBtn.disabled = false;
+    profileSaveBtn.disabled = false;
   }
 }
 
@@ -566,9 +592,6 @@ function refreshAgentSideEffects(toolsUsed) {
   if (!toolsUsed || toolsUsed.length === 0) return;
   if (toolsUsed.some((t) => t === "save_routine" || t === "clear_routine")) {
     loadRoutine();
-  }
-  if (toolsUsed.some((t) => t === "schedule_workout" || t === "clear_planned_workouts")) {
-    loadPlanned();
   }
 }
 
@@ -643,9 +666,13 @@ async function init() {
   loadAppleHealth();
 
   routineClearBtn.addEventListener("click", clearRoutine);
-  plannedClearBtn.addEventListener("click", clearPlanned);
+  profileSaveBtn.addEventListener("click", () => saveProfile());
+  profileForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    saveProfile();
+  });
   loadRoutine();
-  loadPlanned();
+  loadProfile();
 }
 
 init().catch((err) => {

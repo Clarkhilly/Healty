@@ -8,7 +8,7 @@ from typing import Any
 
 import ollama
 
-from app import insights, planning, routines
+from app import insights, planning, profile, routines
 
 # Qwen 2.5 7B Instruct is the best small open model at tool calling — beats
 # Llama 3.1 8B on structured-data tasks and is the right default for this app.
@@ -381,6 +381,9 @@ workout log. Talk to them like a friend who happens to know lifting — direct, 
 specific, no filler.
 
 Hard rules:
+- A **self-reported user profile** (age, training history, short notes) may be \
+appended below the main rules. It is **not** from their CSV or Apple Health — \
+use it to personalize tone and expectations, not as a medical history.
 - Reference date = log_last_date from tools = latest workout in their log, not \
 today's calendar date. Every tool returns log_first_date / log_last_date \
 (ISO YYYY-MM-DD) when data exists. Windowed tools also return explicit \
@@ -455,19 +458,21 @@ yellow flag.
 
 
 def _build_system_prompt() -> str:
-    """Inject the saved routine summary (if any) into the static base prompt.
-    Built per-turn so a freshly-saved routine is visible on the very next
-    message — useful when the user follows up with "now schedule it for next
-    week"."""
+    """Inject saved routine + self-reported profile into the base prompt.
+    Built per-turn so a freshly-saved routine or profile is visible on the very
+    next message."""
+    chunks: list[str] = [SYSTEM_PROMPT_BASE]
+    prof = profile.profile_for_prompt()
+    if prof:
+        chunks.append("\n\n" + prof)
     summary = routines.routine_for_prompt()
-    if not summary:
-        return SYSTEM_PROMPT_BASE
-    return (
-        SYSTEM_PROMPT_BASE
-        + "\n\nUser has a saved routine on record — use `get_routine()` to "
-        + "fetch the full details before applying it to the calendar:\n"
-        + summary
-    )
+    if summary:
+        chunks.append(
+            "\n\nUser has a saved routine on record — use `get_routine()` to "
+            "fetch the full details before applying it to the calendar:\n"
+            + summary
+        )
+    return "".join(chunks)
 
 
 def _coerce_args(name: str, args: dict[str, Any]) -> dict[str, Any]:

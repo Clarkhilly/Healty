@@ -718,71 +718,54 @@ main {
 }
 
 #routine-clear,
-#planned-clear {
+#profile-save {
   font-size: 0.78rem;
   padding: 0.35rem 0.75rem;
 }
 
-/* ── Planned panel ──────────────────────────────────────────────────── */
-.planned-list {
+/* ── User profile (chat context) ───────────────────────────────────── */
+.profile-form {
+  margin-top: 0.35rem;
+}
+
+.profile-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 0.85rem;
-  margin-top: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem 1rem;
 }
 
-.planned-card {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.85rem 1rem;
-}
-
-.planned-card-head {
+.profile-field {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 0.5rem;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 0.4rem;
-}
-
-.planned-date {
-  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  flex-direction: column;
+  gap: 0.3rem;
   font-size: 0.78rem;
   color: var(--muted);
 }
 
-.planned-title {
-  font-weight: 600;
-  font-size: 0.95rem;
-  color: var(--accent);
-  text-align: right;
+.profile-field span {
+  font-weight: 500;
+  color: var(--text);
 }
 
-.planned-notes {
-  margin: 0 0 0.5rem;
-  font-size: 0.8rem;
-  color: var(--muted);
-  font-style: italic;
+.profile-field input,
+.profile-field select,
+.profile-field textarea {
+  font: inherit;
+  font-size: 0.88rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
 }
 
-.planned-exercises {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  font-size: 0.85rem;
+.profile-field textarea {
+  resize: vertical;
+  min-height: 3rem;
 }
 
-.planned-exercises li {
-  padding: 0.3rem 0;
-  border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
-  line-height: 1.45;
-}
-
-.planned-exercises li:last-child {
-  border-bottom: none;
+.profile-field-full {
+  margin-top: 0.65rem;
 }
 
 .ex-detail {
