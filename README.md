@@ -125,4 +125,9 @@ external API calls, no data leaves your laptop.
 
 ## License
 
-MIT.
+[PolyForm Noncommercial 1.0.0](./LICENSE) — free to use, modify, and share
+for any non-commercial purpose (personal use, learning, research, hobby
+projects, education). You may **not** sell this software, charge for hosted
+copies of it, or build a paid product around it.
+
+If you want to use it commercially, get in touch.
