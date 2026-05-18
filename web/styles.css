@@ -44,6 +44,23 @@ body {
   font-size: 0.95rem;
 }
 
+.data-sources {
+  margin: 0 0 0.6rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  max-width: 78ch;
+}
+
+.data-sources code {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.75rem;
+  color: var(--accent);
+}
+
 .header-controls {
   display: flex;
   align-items: center;
@@ -516,4 +533,268 @@ main {
 
 .chat-status-warn {
   color: #ffc46b;
+}
+
+/* ── Apple Health panel ─────────────────────────────────────────────── */
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.25rem;
+}
+
+.panel-head h2 { margin: 0; }
+
+#apple-reload {
+  font-size: 0.78rem;
+  padding: 0.35rem 0.75rem;
+}
+
+.cardio-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.cardio-list li {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr auto;
+  grid-template-rows: auto auto;
+  gap: 0.1rem 0.6rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.cardio-list li:last-child {
+  border-bottom: none;
+}
+
+.cardio-date {
+  color: var(--muted);
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 0.78rem;
+}
+
+.cardio-activity {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardio-source {
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  justify-self: end;
+}
+
+.cardio-meta {
+  grid-column: 2 / -1;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.weight-trend {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.weight-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.weight-current {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.weight-delta {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 0.8rem;
+}
+
+.weight-delta.up   { color: #ff9b6b; }
+.weight-delta.down { color: #6bd0a0; }
+
+.weight-range {
+  font-size: 0.75rem;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+}
+
+.weight-single {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--accent);
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.weight-single .weight-date {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-weight: 500;
+}
+
+.sparkline {
+  width: 100%;
+  height: 80px;
+  color: var(--accent);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+/* ── Routine panel ──────────────────────────────────────────────────── */
+.routine-display { margin-top: 0.25rem; }
+
+.routine-meta {
+  margin: 0 0 0.75rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.routine-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.85rem;
+}
+
+.routine-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+}
+
+.routine-card-head {
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.routine-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--accent);
+}
+
+.routine-notes {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.routine-exercises {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.85rem;
+}
+
+.routine-exercises li {
+  padding: 0.3rem 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
+  line-height: 1.45;
+}
+
+.routine-exercises li:last-child {
+  border-bottom: none;
+}
+
+#routine-clear,
+#planned-clear {
+  font-size: 0.78rem;
+  padding: 0.35rem 0.75rem;
+}
+
+/* ── Planned panel ──────────────────────────────────────────────────── */
+.planned-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.85rem;
+  margin-top: 0.5rem;
+}
+
+.planned-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+}
+
+.planned-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.4rem;
+}
+
+.planned-date {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.planned-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--accent);
+  text-align: right;
+}
+
+.planned-notes {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.planned-exercises {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.85rem;
+}
+
+.planned-exercises li {
+  padding: 0.3rem 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
+  line-height: 1.45;
+}
+
+.planned-exercises li:last-child {
+  border-bottom: none;
+}
+
+.ex-detail {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-left: 0.4rem;
+}
+
+.ex-note {
+  display: block;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-style: italic;
+  margin-top: 0.1rem;
 }

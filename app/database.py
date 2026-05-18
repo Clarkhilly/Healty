@@ -8,6 +8,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = ROOT / "data.db"
 CSV_PATH = ROOT / "workout_data.csv"
+APPLE_HEALTH_XML_PATH = ROOT / "apple_health_export" / "export.xml"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sets (
@@ -48,6 +49,81 @@ CREATE INDEX IF NOT EXISTS idx_sets_date ON sets(workout_date);
 CREATE INDEX IF NOT EXISTS idx_sets_session ON sets(session_key);
 CREATE INDEX IF NOT EXISTS idx_sets_exercise ON sets(exercise_title);
 CREATE INDEX IF NOT EXISTS idx_sessions_date ON sessions(workout_date);
+
+-- ── Apple Health (separate from Hevy lifting data) ─────────────────────────
+-- Workouts: one row per <Workout> in export.xml. Strength workouts that Hevy
+-- syncs to Apple Health show up here with source='Hevy' — keep them, but the
+-- insights layer filters them out for cardio/non-lifting views.
+CREATE TABLE IF NOT EXISTS health_workouts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    activity_type TEXT NOT NULL,
+    start_time    TEXT NOT NULL,
+    end_time      TEXT,
+    workout_date  TEXT NOT NULL,
+    duration_min  REAL,
+    energy_kcal   REAL,
+    distance_mi   REAL,
+    source        TEXT NOT NULL,
+    UNIQUE(start_time, activity_type, source)
+);
+
+-- Low-volume per-sample metrics (body weight, BMI, RHR, HRV).
+CREATE TABLE IF NOT EXISTS health_metric_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    metric_type TEXT NOT NULL,
+    sample_date TEXT NOT NULL,
+    sample_time TEXT NOT NULL,
+    value       REAL NOT NULL,
+    unit        TEXT,
+    source      TEXT NOT NULL,
+    UNIQUE(metric_type, sample_time, source)
+);
+
+-- High-volume cumulative metrics (steps, energy, distance) folded to daily
+-- totals at load time so we don't store millions of individual samples.
+CREATE TABLE IF NOT EXISTS health_daily (
+    metric_type TEXT NOT NULL,
+    day         TEXT NOT NULL,
+    total       REAL NOT NULL,
+    samples     INTEGER NOT NULL,
+    PRIMARY KEY (metric_type, day)
+);
+
+CREATE INDEX IF NOT EXISTS idx_hw_date       ON health_workouts(workout_date);
+CREATE INDEX IF NOT EXISTS idx_hw_source     ON health_workouts(source);
+CREATE INDEX IF NOT EXISTS idx_hms_type_date ON health_metric_samples(metric_type, sample_date);
+CREATE INDEX IF NOT EXISTS idx_hd_type_day   ON health_daily(metric_type, day);
+
+-- ── Saved workout routine (a reusable session template) ──────────────────
+-- One slot per user (enforced with id=1). A routine is a list of sessions —
+-- each session has a title + list of exercises, with no calendar dates. The
+-- LLM populates it via `save_routine` when the user asks for a split/template;
+-- the model can later APPLY it to the calendar by calling schedule_workout
+-- for each session.
+CREATE TABLE IF NOT EXISTS routine (
+    id            INTEGER PRIMARY KEY,
+    name          TEXT NOT NULL,
+    sessions_json TEXT NOT NULL,
+    notes         TEXT,
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- ── Planned workouts (forward-looking sessions written by the LLM) ────────
+-- The chat layer's `schedule_workout` tool inserts here. Each row is one
+-- upcoming session with a JSON list of exercises. UNIQUE(date,title) lets
+-- the LLM idempotently re-plan a session without creating duplicates.
+CREATE TABLE IF NOT EXISTS planned_workouts (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    planned_date   TEXT NOT NULL,
+    title          TEXT NOT NULL,
+    exercises_json TEXT NOT NULL,
+    notes          TEXT,
+    source         TEXT NOT NULL DEFAULT 'llm',
+    status         TEXT NOT NULL DEFAULT 'planned',
+    created_at     TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    UNIQUE(planned_date, title)
+);
+CREATE INDEX IF NOT EXISTS idx_pw_date ON planned_workouts(planned_date);
 """
 
 
@@ -63,11 +139,19 @@ def init_db(force_reload: bool = False) -> None:
 
     conn = get_connection()
     conn.executescript(SCHEMA)
-    count = conn.execute("SELECT COUNT(*) FROM sets").fetchone()[0]
+    sets_count = conn.execute("SELECT COUNT(*) FROM sets").fetchone()[0]
+    health_count = conn.execute("SELECT COUNT(*) FROM health_workouts").fetchone()[0]
     conn.close()
 
-    if count == 0:
+    if sets_count == 0:
         load_csv()
+
+    # Lazy Apple Health import: only on first run (table empty) AND if the XML
+    # exists. Subsequent imports go through /api/apple-health/reload so we
+    # don't pay the iterparse cost on every server start.
+    if health_count == 0 and APPLE_HEALTH_XML_PATH.exists():
+        from app.apple_health import load_apple_health  # lazy to avoid circular import
+        load_apple_health()
 
 
 SETS_COLS = [

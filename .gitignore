@@ -21,6 +21,11 @@ fatigue_output/
 # Personal workout data (kept local-only)
 workout_data.csv
 
+# Apple Health export (huge, personal, regenerable from the phone)
+apple_health_export/
+export.xml
+export_cda.xml
+
 # Environment / secrets (never commit these)
 .env
 .env.*

@@ -15,16 +15,30 @@ const chatInput = document.getElementById("chat-input");
 const chatSend = document.getElementById("chat-send");
 const chatNerd = document.getElementById("chat-nerd");
 
+const appleStatus = document.getElementById("apple-status");
+const appleStats = document.getElementById("apple-stats");
+const cardioList = document.getElementById("cardio-list");
+const weightTrend = document.getElementById("weight-trend");
+const appleReloadBtn = document.getElementById("apple-reload");
+
+const routineStatus = document.getElementById("routine-status");
+const routineDisplay = document.getElementById("routine-display");
+const routineClearBtn = document.getElementById("routine-clear");
+
+const plannedStatus = document.getElementById("planned-status");
+const plannedList = document.getElementById("planned-list");
+const plannedClearBtn = document.getElementById("planned-clear");
+
 const NERD_STORAGE_KEY = "nerd-mode";
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 const SUGGESTED_QUESTIONS = [
-  "What does my workout schedule look like recently?",
+  "Build me a PPL hypertrophy routine, 6 days a week.",
+  "Schedule next week from my saved routine, starting Monday.",
+  "Give me a weekly digest of last week.",
+  "Which of my lifts have stalled in the last 6 weeks?",
   "Am I overtraining or under-training any muscle group?",
-  "Which exercises have I been progressing on, and which have stalled?",
   "How does my volume this month compare to last month?",
-  "Is my rest-day pattern healthy?",
-  "Suggest one thing I should change in the next 2 weeks.",
 ];
 
 const conversation = [];
@@ -234,6 +248,7 @@ async function askQuestion(question) {
       tools: data.tools_used || [],
     });
     conversation.push({ role: "assistant", content: data.answer || "" });
+    refreshAgentSideEffects(data.tools_used);
   } catch (err) {
     placeholder.remove();
     appendChatMessage("assistant",
@@ -278,6 +293,283 @@ function renderChatNerdNote() {
     </ol>
     <p>For weaker hardware (faster, rougher tool use), try:
        <code>OLLAMA_MODEL=qwen2.5:3b-instruct-q4_K_M ./run.sh</code>.</p>`;
+}
+
+function renderWeightSparkline(samples) {
+  if (!samples || samples.length === 0) {
+    weightTrend.innerHTML = `<p class="empty-state">No weight samples in Apple Health.</p>`;
+    return;
+  }
+  if (samples.length === 1) {
+    const s = samples[0];
+    weightTrend.innerHTML =
+      `<div class="weight-single">${s.value} lb` +
+      `<span class="weight-date">${escapeHtml(s.date)}</span></div>`;
+    return;
+  }
+
+  const W = 320, H = 80, PAD = 6;
+  const values = samples.map((s) => s.value);
+  const minV = Math.min(...values);
+  const maxV = Math.max(...values);
+  const range = Math.max(maxV - minV, 0.5);
+  const x = (i) => PAD + (i * (W - PAD * 2)) / Math.max(samples.length - 1, 1);
+  const y = (v) => PAD + (H - PAD * 2) * (1 - (v - minV) / range);
+  const points = samples.map((s, i) => `${x(i).toFixed(1)},${y(s.value).toFixed(1)}`).join(" ");
+  const first = samples[0], last = samples[samples.length - 1];
+  const delta = last.value - first.value;
+  const arrow = delta > 0 ? "▲" : delta < 0 ? "▼" : "·";
+
+  weightTrend.innerHTML = `
+    <div class="weight-stats">
+      <span class="weight-current">${last.value} lb</span>
+      <span class="weight-delta ${delta > 0 ? "up" : delta < 0 ? "down" : ""}">
+        ${arrow} ${Math.abs(delta).toFixed(1)} lb
+      </span>
+      <span class="weight-range">${escapeHtml(first.date)} → ${escapeHtml(last.date)}</span>
+    </div>
+    <svg class="sparkline" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <polyline points="${points}" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    </svg>`;
+}
+
+function renderAppleHealth(data) {
+  if (!data.xml_present) {
+    appleStatus.textContent =
+      "No Apple Health export found. Drop the unzipped export at apple_health_export/export.xml, then click Reload XML.";
+    appleStats.innerHTML = "";
+    cardioList.innerHTML = "";
+    weightTrend.innerHTML = "";
+    appleReloadBtn.disabled = false;
+    return;
+  }
+  if (!data.loaded || data.workouts_total === 0) {
+    appleStatus.textContent = "Apple Health export present but not yet loaded. Click Reload XML.";
+    appleStats.innerHTML = "";
+    cardioList.innerHTML = "";
+    weightTrend.innerHTML = "";
+    return;
+  }
+
+  appleStatus.textContent =
+    `${data.workouts_total} workouts · ${data.non_strength_workouts} non-lifting · ` +
+    `${data.first_workout_date} → ${data.last_workout_date}`;
+
+  const cards = [
+    {
+      label: "Latest weight",
+      value: data.latest_weight ? `${data.latest_weight.value} ${data.latest_weight.unit}` : "—",
+    },
+    {
+      label: "Resting HR",
+      value: data.latest_resting_hr ? `${data.latest_resting_hr.value} bpm` : "—",
+    },
+    {
+      label: "HRV (SDNN)",
+      value: data.latest_hrv_sdnn_ms ? `${data.latest_hrv_sdnn_ms.value} ms` : "—",
+    },
+    {
+      label: "Avg steps (28d)",
+      value: data.avg_steps_last_28d ? formatNumber(Math.round(data.avg_steps_last_28d)) : "—",
+    },
+    {
+      label: "Avg active kcal (28d)",
+      value: data.avg_active_kcal_last_28d ? Math.round(data.avg_active_kcal_last_28d) : "—",
+    },
+    {
+      label: "Non-lifting workouts",
+      value: data.non_strength_workouts,
+    },
+  ];
+  appleStats.innerHTML = cards
+    .map((c) => `
+      <div class="stat-card">
+        <div class="value">${c.value}</div>
+        <div class="label">${c.label}</div>
+      </div>`)
+    .join("");
+
+  renderWeightSparkline(data.weight_trend);
+}
+
+function renderCardioList(payload) {
+  if (!payload || !payload.sessions_list || payload.sessions_list.length === 0) {
+    cardioList.innerHTML = `<li class="empty-state">No non-lifting workouts in the last ${payload?.weeks || 4} weeks.</li>`;
+    return;
+  }
+  cardioList.innerHTML = payload.sessions_list
+    .map((s) => {
+      const parts = [];
+      if (s.duration_min) parts.push(`${s.duration_min} min`);
+      if (s.distance_mi)  parts.push(`${s.distance_mi} mi`);
+      if (s.energy_kcal)  parts.push(`${s.energy_kcal} kcal`);
+      const meta = parts.join(" · ");
+      return `
+        <li>
+          <span class="cardio-date">${escapeHtml(s.date)}</span>
+          <span class="cardio-activity">${escapeHtml(s.activity)}</span>
+          <span class="cardio-meta">${escapeHtml(meta || "—")}</span>
+          <span class="cardio-source">${escapeHtml(s.source)}</span>
+        </li>`;
+    })
+    .join("");
+}
+
+async function loadAppleHealth() {
+  try {
+    appleStatus.textContent = "Loading…";
+    const [summary, cardio] = await Promise.all([
+      fetchJson("/api/apple-health/summary"),
+      fetchJson("/api/apple-health/cardio?weeks=4").catch(() => null),
+    ]);
+    renderAppleHealth(summary);
+    renderCardioList(cardio);
+  } catch (err) {
+    appleStatus.textContent = `Apple Health unavailable. ${err.message}`;
+  }
+}
+
+async function reloadAppleHealth() {
+  appleReloadBtn.disabled = true;
+  appleStatus.textContent = "Reloading Apple Health XML (this can take 5–60s)…";
+  try {
+    const res = await fetchJson("/api/apple-health/reload", { method: "POST" });
+    if (res.ok === false) {
+      appleStatus.textContent = `Reload failed: ${res.reason || "unknown"}`;
+    } else {
+      await loadAppleHealth();
+    }
+  } catch (err) {
+    appleStatus.textContent = `Reload failed: ${err.message}`;
+  } finally {
+    appleReloadBtn.disabled = false;
+  }
+}
+
+// ── Saved routine (reusable template, no dates) ─────────────────────────
+function renderRoutine(r) {
+  if (!r || !r.exists || !r.sessions || r.sessions.length === 0) {
+    routineStatus.innerHTML =
+      `No routine saved yet. Ask the chat for a split — e.g. <em>"build me a PPL hypertrophy routine"</em>.`;
+    routineDisplay.innerHTML = "";
+    return;
+  }
+  routineStatus.textContent =
+    `${escapeHtml(r.name)} · ${r.sessions.length} session${r.sessions.length === 1 ? "" : "s"}` +
+    (r.updated_at ? ` · updated ${r.updated_at}` : "");
+
+  const cards = r.sessions
+    .map((s) => `
+      <div class="routine-card">
+        <div class="routine-card-head">
+          <span class="routine-title">${escapeHtml(s.title || "")}</span>
+        </div>
+        ${s.notes ? `<p class="routine-notes">${escapeHtml(s.notes)}</p>` : ""}
+        <ul class="routine-exercises">
+          ${(s.exercises || []).map((ex) => `<li>${formatExerciseLine(ex)}</li>`).join("")}
+        </ul>
+      </div>`)
+    .join("");
+
+  const head = r.notes
+    ? `<p class="routine-meta">${escapeHtml(r.notes)}</p>`
+    : "";
+
+  routineDisplay.innerHTML = head + `<div class="routine-grid">${cards}</div>`;
+}
+
+async function loadRoutine() {
+  try {
+    const r = await fetchJson("/api/routine");
+    renderRoutine(r);
+  } catch (err) {
+    routineStatus.textContent = `Couldn't load routine: ${err.message}`;
+    routineDisplay.innerHTML = "";
+  }
+}
+
+async function clearRoutine() {
+  if (!confirm("Delete the saved routine?")) return;
+  routineClearBtn.disabled = true;
+  try {
+    await fetchJson("/api/routine", { method: "DELETE" });
+    await loadRoutine();
+  } catch (err) {
+    routineStatus.textContent = `Clear failed: ${err.message}`;
+  } finally {
+    routineClearBtn.disabled = false;
+  }
+}
+
+// ── Planned workouts (LLM-scheduled) ────────────────────────────────────
+function formatExerciseLine(ex) {
+  if (typeof ex === "string") return escapeHtml(ex);
+  const parts = [`<strong>${escapeHtml(ex.name || "")}</strong>`];
+  const detail = [];
+  if (ex.sets)       detail.push(`${ex.sets} sets`);
+  if (ex.reps)       detail.push(`${escapeHtml(String(ex.reps))} reps`);
+  if (ex.weight_lbs) detail.push(`${ex.weight_lbs} lb`);
+  if (detail.length) parts.push(`<span class="ex-detail">${detail.join(" · ")}</span>`);
+  if (ex.notes)      parts.push(`<span class="ex-note">${escapeHtml(ex.notes)}</span>`);
+  return parts.join(" ");
+}
+
+function renderPlanned(payload) {
+  const items = payload?.planned || [];
+  if (items.length === 0) {
+    plannedStatus.textContent = "No upcoming sessions. Ask the chat to build a program.";
+    plannedList.innerHTML = "";
+    return;
+  }
+  plannedStatus.textContent =
+    `${items.length} planned session${items.length === 1 ? "" : "s"} through ${payload.window_end_date}`;
+  plannedList.innerHTML = items
+    .map((s) => `
+      <div class="planned-card">
+        <div class="planned-card-head">
+          <span class="planned-date">${escapeHtml(s.date)}</span>
+          <span class="planned-title">${escapeHtml(s.title)}</span>
+        </div>
+        ${s.notes ? `<p class="planned-notes">${escapeHtml(s.notes)}</p>` : ""}
+        <ul class="planned-exercises">
+          ${(s.exercises || []).map((ex) => `<li>${formatExerciseLine(ex)}</li>`).join("")}
+        </ul>
+      </div>`)
+    .join("");
+}
+
+async function loadPlanned() {
+  try {
+    const p = await fetchJson("/api/planned?days_ahead=21");
+    renderPlanned(p);
+  } catch (err) {
+    plannedStatus.textContent = `Couldn't load planned workouts: ${err.message}`;
+    plannedList.innerHTML = "";
+  }
+}
+
+async function clearPlanned() {
+  if (!confirm("Delete all planned workouts?")) return;
+  plannedClearBtn.disabled = true;
+  try {
+    await fetchJson("/api/planned", { method: "DELETE" });
+    await loadPlanned();
+  } catch (err) {
+    plannedStatus.textContent = `Clear failed: ${err.message}`;
+  } finally {
+    plannedClearBtn.disabled = false;
+  }
+}
+
+// Refresh whatever the LLM might have written this turn.
+function refreshAgentSideEffects(toolsUsed) {
+  if (!toolsUsed || toolsUsed.length === 0) return;
+  if (toolsUsed.some((t) => t === "save_routine" || t === "clear_routine")) {
+    loadRoutine();
+  }
+  if (toolsUsed.some((t) => t === "schedule_workout" || t === "clear_planned_workouts")) {
+    loadPlanned();
+  }
 }
 
 async function loadYear(year) {
@@ -346,6 +638,14 @@ async function init() {
 
   yearSelect.addEventListener("change", () => loadYear(parseInt(yearSelect.value, 10)));
   await loadYear(defaultYear);
+
+  appleReloadBtn.addEventListener("click", reloadAppleHealth);
+  loadAppleHealth();
+
+  routineClearBtn.addEventListener("click", clearRoutine);
+  plannedClearBtn.addEventListener("click", clearPlanned);
+  loadRoutine();
+  loadPlanned();
 }
 
 init().catch((err) => {

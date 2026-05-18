@@ -9,6 +9,11 @@
 <body>
   <header class="header">
     <h1>Workout Dashboard</h1>
+    <p class="data-sources">
+      Plugs into your <strong>Hevy</strong> app (lifting — sets, reps, personal records)
+      and <strong>Apple Health</strong> (cardio sessions, weight, heart rate, daily steps
+      from your iPhone or Apple Watch). Use either, or both for the full picture.
+    </p>
     <p class="subtitle" id="date-range">Loading…</p>
     <div class="header-controls">
       <label class="year-picker">
@@ -71,6 +76,98 @@
         <ul>
           <li><code>L1</code> &lt; 25%, <code>L2</code> &lt; 50%, <code>L3</code> &lt; 75%, <code>L4</code> ≥ 75% of the year's peak.</li>
           <li>Rest days render as <code>L0</code>.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="panel" id="apple-health-panel">
+      <div class="panel-head">
+        <h2>Apple Health <span class="badge">device</span></h2>
+        <button type="button" id="apple-reload" class="nerd-toggle">Reload XML</button>
+      </div>
+      <p class="subtitle" id="apple-status">Loading…</p>
+      <div class="stats-grid" id="apple-stats"></div>
+      <div class="two-col">
+        <div>
+          <h3>Recent non-lifting activity</h3>
+          <ul class="cardio-list" id="cardio-list"></ul>
+        </div>
+        <div>
+          <h3>Body weight</h3>
+          <div class="weight-trend" id="weight-trend"></div>
+        </div>
+      </div>
+      <div class="nerd-only nerd-note">
+        <strong>Apple Health data flow</strong>
+        <ul>
+          <li>iPhone Health app's "Export All Health Data" produces
+              <code>export.xml</code> (often 500MB+). Drop it at
+              <code>apple_health_export/export.xml</code>.</li>
+          <li><code>app/apple_health.py</code> streams it with
+              <code>xml.etree.ElementTree.iterparse</code> (constant memory)
+              and writes three SQLite tables: <code>health_workouts</code>,
+              <code>health_metric_samples</code> (weight / RHR / HRV / BMI),
+              and <code>health_daily</code> (per-day sums of steps, kcal,
+              walking distance, flights).</li>
+          <li>Strength sessions Hevy double-writes into Apple Health are
+              imported but filtered from the cardio view via
+              <code>source NOT IN ('Hevy', 'Strong', …)</code> so they don't
+              count twice against your lifting tables.</li>
+          <li>The chat tools <code>cardio_summary</code>,
+              <code>body_metric_trend</code>, and <code>daily_activity</code>
+              expose this data to the LLM.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="panel" id="planned-panel">
+      <div class="panel-head">
+        <h2>Planned <span class="badge">agent</span></h2>
+        <button type="button" id="planned-clear" class="nerd-toggle">Clear all</button>
+      </div>
+      <p class="subtitle" id="planned-status">No upcoming sessions yet. Ask the chat to build a program.</p>
+      <div id="planned-list" class="planned-list"></div>
+      <div class="nerd-only nerd-note">
+        <strong>How planning works</strong>
+        <ul>
+          <li>The chat tool <code>schedule_workout(date, title, exercises)</code> is the
+              app's first <em>write</em> tool. The LLM calls it once per session when you
+              ask for a program. UPSERTs on <code>(date, title)</code>, so re-planning the
+              same day is idempotent.</li>
+          <li>Stored in the <code>planned_workouts</code> table (date, title, JSON exercise
+              list, status). Exposed via <code>GET /api/planned?days_ahead=14</code> and
+              <code>DELETE /api/planned</code>.</li>
+          <li>Read-only sibling tools: <code>list_planned_workouts</code> lets the model
+              check existing plans before adding new ones; <code>clear_planned_workouts</code>
+              lets it wipe a window before re-planning.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="panel" id="routine-panel">
+      <div class="panel-head">
+        <h2>Workout routine <span class="badge">agent</span></h2>
+        <button type="button" id="routine-clear" class="nerd-toggle">Clear routine</button>
+      </div>
+      <p class="subtitle" id="routine-status">No routine saved yet. Ask the chat for a split — e.g. <em>"build me a PPL hypertrophy routine"</em>.</p>
+      <div id="routine-display" class="routine-display"></div>
+      <div class="nerd-only nerd-note">
+        <strong>Routine vs Planned</strong>
+        <ul>
+          <li><strong>Routine</strong> = reusable weekly template (Push A / Pull A /
+              Legs A…) with no calendar dates. One slot per user, stored in the
+              <code>routine</code> table (single row, id = 1).</li>
+          <li><strong>Planned</strong> = specific dated sessions for the upcoming week(s).
+              Built from the routine by calling <code>schedule_workout</code> per day.</li>
+          <li>Chat tools:
+              <code>save_routine(name, sessions)</code> overwrites this slot;
+              <code>get_routine()</code> reads it (the model uses this before applying
+              the routine to the calendar); <code>clear_routine()</code> wipes it.
+              Surfaced via <code>GET /api/routine</code> and
+              <code>DELETE /api/routine</code>.</li>
+          <li>The active routine name + session titles are injected into the system
+              prompt every turn, so the model can apply it consistently on follow-ups
+              like "now schedule next week".</li>
         </ul>
       </div>
     </section>

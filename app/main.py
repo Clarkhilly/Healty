@@ -8,7 +8,11 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from app import apple_health as apple_mod
 from app import chat as chat_mod
+from app import insights
+from app import planning
+from app import routines
 from app import stats
 from app.database import init_db
 
@@ -59,6 +63,52 @@ def year_review(year: int) -> dict:
 def reload_db() -> dict:
     init_db(force_reload=True)
     return {"status": "reloaded"}
+
+
+@app.get("/api/apple-health/summary")
+def apple_health_summary() -> dict:
+    return apple_mod.summary_payload()
+
+
+@app.get("/api/apple-health/cardio")
+def apple_health_cardio(weeks: int = Query(default=4, ge=1, le=104)) -> dict:
+    return insights.cardio_summary(weeks)
+
+
+@app.post("/api/apple-health/reload")
+def apple_health_reload() -> dict:
+    return apple_mod.load_apple_health(force_reload=True)
+
+
+@app.get("/api/routine")
+def get_routine() -> dict:
+    return routines.get_routine()
+
+
+@app.delete("/api/routine")
+def clear_routine() -> dict:
+    return routines.clear_routine()
+
+
+@app.get("/api/planned")
+def get_planned(
+    days_ahead: int = Query(default=14, ge=1, le=365),
+    include_past: bool = Query(default=False),
+) -> dict:
+    return planning.list_planned_workouts(days_ahead, include_past)
+
+
+@app.delete("/api/planned")
+def delete_planned(from_date: str | None = Query(default=None)) -> dict:
+    return planning.clear_planned_workouts(from_date)
+
+
+@app.get("/api/stalls")
+def get_stalls(
+    weeks: int = Query(default=8, ge=1, le=52),
+    min_sessions: int = Query(default=4, ge=2, le=20),
+) -> dict:
+    return insights.stall_report(weeks, min_sessions)
 
 
 @app.get("/api/chat/health")

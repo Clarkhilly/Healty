@@ -8,7 +8,7 @@ from typing import Any
 
 import ollama
 
-from app import insights
+from app import insights, planning, routines
 
 # Qwen 2.5 7B Instruct is the best small open model at tool calling — beats
 # Llama 3.1 8B on structured-data tasks and is the right default for this app.
@@ -17,7 +17,7 @@ DEFAULT_MODEL = "qwen2.5:7b-instruct-q4_K_M"
 MODEL = os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
 HOST  = os.environ.get("OLLAMA_HOST",  "http://127.0.0.1:11434")
 
-MAX_TOOL_ROUNDS    = 4
+MAX_TOOL_ROUNDS    = 12
 MAX_HISTORY_TURNS  = 6
 
 _LOGICAL = os.cpu_count() or 4
@@ -162,6 +162,192 @@ TOOLS: list[dict[str, Any]] = [
             "parameters": {"type": "object", "properties": {}},
         },
     },
+    # ── Apple Health tools ────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "cardio_summary",
+            "description": "Apple Health workouts in the last N weeks, EXCLUDING strength "
+                           "sessions that Hevy duplicated into Apple Health. Use for cardio, "
+                           "conditioning, watch-logged activity, or 'am I doing anything "
+                           "besides lifting' questions. Returns sessions, totals, and a list.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "weeks": {"type": "integer", "description": "Window in weeks (default 4).", "default": 4}
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "body_metric_trend",
+            "description": "Trend of one body / cardio-health metric from Apple Health over "
+                           "the last N weeks: BodyMass, BodyMassIndex, RestingHeartRate, or "
+                           "HeartRateVariabilitySDNN. Returns first/last/min/max/avg, pct "
+                           "change, and a chronological sample list.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "metric": {
+                        "type": "string",
+                        "enum": ["BodyMass", "BodyMassIndex", "RestingHeartRate", "HeartRateVariabilitySDNN"],
+                        "default": "BodyMass",
+                    },
+                    "weeks": {"type": "integer", "default": 12},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "daily_activity",
+            "description": "Daily steps, active calories, basal calories, walking miles, and "
+                           "flights climbed from Apple Health, averaged over the last N weeks. "
+                           "Use for activity-level / NEAT / general-movement questions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "weeks": {"type": "integer", "default": 4}
+                },
+            },
+        },
+    },
+    # ── Stall detector ────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "stall_report",
+            "description": "Classify working lifts as stalled or progressing over the "
+                           "last N weeks. Returns the stalled list (no new heavy-set PR + "
+                           "flat avg-weight slope) and a progressing list. Use this for "
+                           "'what's plateaued / what should I push' questions instead of "
+                           "calling exercise_progression for every lift.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "weeks":        {"type": "integer", "default": 8},
+                    "min_sessions": {"type": "integer", "default": 4},
+                },
+            },
+        },
+    },
+    # ── Saved routine (a reusable template — distinct from planned dates) ─
+    {
+        "type": "function",
+        "function": {
+            "name": "save_routine",
+            "description": "Save (or overwrite) the user's current reusable workout "
+                           "routine — the template they want to repeat. Call this when the "
+                           "user asks for a 'routine', 'split', 'weekly template', 'program "
+                           "structure', or 'what should my week look like'. The routine has "
+                           "session titles + exercises but NO dates. To put it on the "
+                           "calendar, use `schedule_workout` for each day separately.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Routine name, e.g. 'PPL Hypertrophy', "
+                                       "'Upper/Lower 4x', 'Full Body 3x'.",
+                    },
+                    "sessions": {
+                        "type": "array",
+                        "description": "Ordered list of sessions. Each item is an object "
+                                       "{title, exercises, notes?}. `exercises` may be a "
+                                       "list of strings OR a list of objects "
+                                       "{name, sets, reps, weight_lbs, notes}.",
+                        "items": {"type": "object"},
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Optional routine-level note (goal, RPE cap, etc).",
+                    },
+                },
+                "required": ["name", "sessions"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_routine",
+            "description": "Read the user's saved routine (name + list of session "
+                           "templates). Use BEFORE generating planned workouts so you "
+                           "can apply the routine to the calendar consistently, or to "
+                           "answer 'what's my routine'.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "clear_routine",
+            "description": "Delete the saved routine. Use only when the user explicitly "
+                           "says 'wipe my routine' / 'I want to start over'.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    # ── Planning / program generator (WRITE + READ) ───────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "schedule_workout",
+            "description": "Add a planned workout for a specific future date. Use this when "
+                           "the user asks for a program / split / schedule. Call once per "
+                           "session you want to schedule. UPSERTs on (date, title) so calling "
+                           "twice for the same day+title overwrites — safe to re-plan.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date":  {"type": "string", "description": "ISO YYYY-MM-DD."},
+                    "title": {"type": "string", "description": "Session name, e.g. 'Push A'."},
+                    "exercises": {
+                        "type": "array",
+                        "description": "List of exercises. Each item may be a string "
+                                       "(name only) OR an object {name, sets, reps, "
+                                       "weight_lbs, notes}.",
+                        "items": {"type": "object"},
+                    },
+                    "notes": {"type": "string", "description": "Optional session note."},
+                },
+                "required": ["date", "title", "exercises"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_planned_workouts",
+            "description": "Return planned workouts in the next N days. Use to check what's "
+                           "already scheduled before adding more, or to answer 'what's on tap "
+                           "this week'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days_ahead":   {"type": "integer", "default": 14},
+                    "include_past": {"type": "boolean", "default": False},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "clear_planned_workouts",
+            "description": "Delete planned workouts. Pass `from_date` (YYYY-MM-DD) to keep "
+                           "earlier ones; omit it to wipe all. Use before generating a brand-"
+                           "new program if the user wants to replace what's there.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "from_date": {"type": "string", "description": "YYYY-MM-DD, optional."},
+                },
+            },
+        },
+    },
 ]
 
 
@@ -175,10 +361,22 @@ TOOL_DISPATCH = {
     "recent_sessions":      insights.recent_sessions,
     "compare_periods":      insights.compare_periods,
     "list_exercises":       insights.list_exercises,
+    "cardio_summary":       insights.cardio_summary,
+    "body_metric_trend":    insights.body_metric_trend,
+    "daily_activity":       insights.daily_activity,
+    "stall_report":         insights.stall_report,
+    # write tools — planning (dated upcoming sessions)
+    "schedule_workout":      planning.schedule_workout,
+    "list_planned_workouts": planning.list_planned_workouts,
+    "clear_planned_workouts": planning.clear_planned_workouts,
+    # write tools — routine (reusable template, no dates)
+    "save_routine":          routines.save_routine,
+    "get_routine":           routines.get_routine,
+    "clear_routine":         routines.clear_routine,
 }
 
 
-SYSTEM_PROMPT = """You are the user's strength coach reviewing their own \
+SYSTEM_PROMPT_BASE = """You are the user's strength coach reviewing their own \
 workout log. Talk to them like a friend who happens to know lifting — direct, \
 specific, no filler.
 
@@ -191,15 +389,53 @@ Quote those strings exactly when you mention time ranges.
 - Never invent numbers, dates, percentages, or exercise names. Call a tool \
 first; if it errors, retry with different args or a different tool. Don't \
 make things up.
-- Stay in your lane. Programming (volume, frequency, balance, progression) is \
-yours. Pain, injuries, nutrition, supplements, body comp — defer: "that's a \
-physio/RD question, not mine."
+- Stay in your lane. Programming (volume, frequency, balance, progression) \
+is yours. Body composition / cardio fitness trends pulled FROM TOOLS \
+(`body_metric_trend`, `daily_activity`, `cardio_summary` — Apple Health \
+data) are also fair game; describe what the numbers show. Pain, injuries, \
+nutrition, supplements, medical advice — defer: "that's a physio/RD \
+question, not mine."
+- Apple Health vs Hevy: lifting belongs to Hevy tools (sets/PRs/sessions); \
+watch-recorded cardio and body metrics belong to the Apple Health tools. \
+`cardio_summary` already filters out Hevy-duplicated strength workouts, so \
+don't worry about double-counting.
+
+Routine vs Planned — pick the right write tool:
+- A **routine** is a REUSABLE WEEKLY TEMPLATE with no dates ("Push A", \
+"Pull A", "Legs A", "Upper A"…). Save it with `save_routine(name, sessions)` \
+when the user asks for "a routine", "a split", "a weekly template", \
+"my program structure", "what my week should look like".
+- A **planned workout** is a SPECIFIC DATED SESSION ("Mon Oct 13 — Push A"). \
+Use `schedule_workout(date, title, exercises)` once per day when the user \
+asks to "schedule next week", "build me a 4-week program starting Monday", \
+"put it on the calendar", or similar.
+- Natural combo: if the user asks for both, save the routine first, then \
+schedule_workout for each day applying the routine sessions in order.
+- Before scheduling many sessions, call `get_routine()` if a saved routine \
+exists — apply it instead of inventing new sessions.
+- Sensible defaults: sets 3-4, reps "8-12" for hypertrophy / "3-6" for \
+strength. Use exercise names from `list_exercises` when possible — don't \
+invent new ones unless the user specifically asks. If replacing an existing \
+program on the calendar, call `clear_planned_workouts(from_date)` first.
+- After writing, summarize in your reply — don't dump the JSON.
+
+Weekly digest format — if the user asks for a "digest", "weekly review", \
+"how did this week go", or similar: call schedule_summary(1), \
+muscle_group_volume(1), compare_periods(1), and stall_report(6). Then write:
+  **Verdict** in one sentence.
+  - **What went up**: 1-2 bullets (PRs hit, sessions vs prior week).
+  - **What stalled / dropped**: 1-2 bullets (named lifts from stall_report).
+  - **One change for next week**: a single concrete action.
+
+Stall questions: prefer `stall_report` (one call) over running \
+`exercise_progression` for each lift.
 
 How to answer:
 - Lead with the verdict in the first sentence. No "Great question," no \
 restating what they asked, no closing "let me know if…"
 - ~60-140 words for most questions. One short paragraph OR 3-5 tight bullets \
-— not both. Only go longer if they explicitly ask for detail.
+— not both. Only go longer if they explicitly ask for detail or for a \
+digest/program.
 - Round numbers like a human ("about 6.5 sessions a week," not "6.4892").
 - Pick the most reasonable interpretation of vague questions instead of \
 asking for clarification.
@@ -216,6 +452,22 @@ calves / core.
 - 1-2 full rest days per week is normal; training daily for weeks is a \
 yellow flag.
 """
+
+
+def _build_system_prompt() -> str:
+    """Inject the saved routine summary (if any) into the static base prompt.
+    Built per-turn so a freshly-saved routine is visible on the very next
+    message — useful when the user follows up with "now schedule it for next
+    week"."""
+    summary = routines.routine_for_prompt()
+    if not summary:
+        return SYSTEM_PROMPT_BASE
+    return (
+        SYSTEM_PROMPT_BASE
+        + "\n\nUser has a saved routine on record — use `get_routine()` to "
+        + "fetch the full details before applying it to the calendar:\n"
+        + summary
+    )
 
 
 def _coerce_args(name: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -273,7 +525,7 @@ def health() -> dict:
 def chat(question: str, history: list[dict] | None = None) -> dict:
     client = _get_client()
 
-    messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages: list[dict] = [{"role": "system", "content": _build_system_prompt()}]
     for h in (history or [])[-MAX_HISTORY_TURNS:]:
         role = h.get("role")
         if role in ("user", "assistant") and h.get("content"):
