@@ -1,0 +1,38 @@
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+.git/
+.gitignore
+.gitattributes
+.github/
+
+.cursor/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+DEV_NOTES.md
+*.log
+*.swp
+*.swo
+
+# Generated artifacts — rebuilt by init_db() on container start.
+data.db
+data.db-journal
+*.sqlite
+*.sqlite3
+fatigue_output/
+
+# Big stuff that doesn't belong in the image.
+export.zip
+
+# Apple Health export is intentionally NOT excluded here so that
+# `git add -f apple_health_export/` (if you choose to commit it) ships
+# in the build context. If you don't commit it, it just won't exist.

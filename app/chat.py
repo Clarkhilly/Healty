@@ -1,4 +1,16 @@
-"""LLM chat layer — talks to a local Ollama instance with tool calling."""
+"""LLM chat layer — OpenAI-compatible client with tool calling.
+
+Provider is auto-selected from env vars:
+
+* `GROQ_API_KEY`   set → Groq hosted (default model: llama-3.3-70b-versatile)
+* `OPENAI_API_KEY` set → OpenAI hosted (default model: gpt-4o-mini)
+* otherwise            → local Ollama at OLLAMA_HOST (default model:
+                         qwen2.5:7b-instruct-q4_K_M). Ollama exposes an
+                         OpenAI-compatible API at /v1, so the same client
+                         works for both hosted and local.
+
+Override the model with `LLM_MODEL=...` (or legacy `OLLAMA_MODEL=...`).
+"""
 
 from __future__ import annotations
 
@@ -6,37 +18,51 @@ import json
 import os
 from typing import Any
 
-import ollama
+from openai import OpenAI
 
 from app import insights, planning, profile, routines
 
-# Qwen 2.5 7B Instruct is the best small open model at tool calling — beats
-# Llama 3.1 8B on structured-data tasks and is the right default for this app.
-# Override via `OLLAMA_MODEL=...` in the environment.
-DEFAULT_MODEL = "qwen2.5:7b-instruct-q4_K_M"
-MODEL = os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
-HOST  = os.environ.get("OLLAMA_HOST",  "http://127.0.0.1:11434")
+_GROQ_KEY   = os.environ.get("GROQ_API_KEY")
+_OPENAI_KEY = os.environ.get("OPENAI_API_KEY")
+
+if _GROQ_KEY:
+    PROVIDER       = "groq"
+    BASE_URL       = os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+    API_KEY        = _GROQ_KEY
+    DEFAULT_MODEL  = "llama-3.3-70b-versatile"
+elif _OPENAI_KEY:
+    PROVIDER       = "openai"
+    BASE_URL       = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    API_KEY        = _OPENAI_KEY
+    DEFAULT_MODEL  = "gpt-4o-mini"
+else:
+    PROVIDER       = "ollama"
+    BASE_URL       = (os.environ.get("OLLAMA_HOST") or "http://127.0.0.1:11434").rstrip("/") + "/v1"
+    API_KEY        = "ollama"  # not validated by Ollama; library requires non-empty
+    DEFAULT_MODEL  = "qwen2.5:7b-instruct-q4_K_M"
+
+MODEL = (
+    os.environ.get("LLM_MODEL")
+    or os.environ.get("OLLAMA_MODEL")
+    or DEFAULT_MODEL
+)
 
 MAX_TOOL_ROUNDS    = 12
 MAX_HISTORY_TURNS  = 6
 
-_LOGICAL = os.cpu_count() or 4
 CHAT_OPTIONS = {
     "temperature": 0.3,
-    "num_predict": 512,
-    "num_ctx":     4096,
-    "num_thread":  max(2, _LOGICAL // 2),
+    "max_tokens":  512,
     "top_p":       0.9,
 }
-KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
 
-_client: ollama.Client | None = None
+_client: OpenAI | None = None
 
 
-def _get_client() -> ollama.Client:
+def _get_client() -> OpenAI:
     global _client
     if _client is None:
-        _client = ollama.Client(host=HOST)
+        _client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
     return _client
 
 
@@ -514,17 +540,24 @@ def _call_tool(name: str, args: dict[str, Any]) -> Any:
 def health() -> dict:
     try:
         client = _get_client()
-        models = client.list().get("models", [])
-        names = {m.get("model") or m.get("name") for m in models}
+        listing = client.models.list()
+        names = sorted(m.id for m in listing.data)
         return {
             "ok":           True,
+            "provider":     PROVIDER,
             "model":        MODEL,
             "model_pulled": MODEL in names,
-            "host":         HOST,
-            "available":    sorted(n for n in names if n),
+            "host":         BASE_URL,
+            "available":    names,
         }
     except Exception as e:  # noqa: BLE001
-        return {"ok": False, "error": f"{type(e).__name__}: {e}", "host": HOST, "model": MODEL}
+        return {
+            "ok":       False,
+            "provider": PROVIDER,
+            "error":    f"{type(e).__name__}: {e}",
+            "host":     BASE_URL,
+            "model":    MODEL,
+        }
 
 
 def chat(question: str, history: list[dict] | None = None) -> dict:
@@ -541,54 +574,65 @@ def chat(question: str, history: list[dict] | None = None) -> dict:
 
     try:
         for _ in range(MAX_TOOL_ROUNDS):
-            response = client.chat(
+            response = client.chat.completions.create(
                 model=MODEL,
                 messages=messages,
                 tools=TOOLS,
-                options=CHAT_OPTIONS,
-                keep_alive=KEEP_ALIVE,
+                **CHAT_OPTIONS,
             )
-            msg = response["message"]
-            tool_calls = msg.get("tool_calls") or []
+            msg = response.choices[0].message
+            tool_calls = msg.tool_calls or []
 
             if not tool_calls:
                 return {
-                    "answer":     msg.get("content", "").strip() or "(empty response)",
+                    "answer":     (msg.content or "").strip() or "(empty response)",
                     "tools_used": tools_used,
                     "rounds":     len(tools_used),
                     "model":      MODEL,
+                    "provider":   PROVIDER,
                 }
 
             messages.append({
-                "role":       "assistant",
-                "content":    msg.get("content", "") or "",
-                "tool_calls": tool_calls,
+                "role":    "assistant",
+                "content": msg.content or "",
+                "tool_calls": [
+                    {
+                        "id":       c.id,
+                        "type":     "function",
+                        "function": {
+                            "name":      c.function.name,
+                            "arguments": c.function.arguments,
+                        },
+                    }
+                    for c in tool_calls
+                ],
             })
 
             for call in tool_calls:
-                fn = call.get("function") or {}
-                name = fn.get("name", "")
-                raw_args = fn.get("arguments", {}) or {}
-                args = raw_args if isinstance(raw_args, dict) else json.loads(raw_args)
+                name = call.function.name
+                raw_args = call.function.arguments or "{}"
+                try:
+                    args = raw_args if isinstance(raw_args, dict) else json.loads(raw_args)
+                except json.JSONDecodeError:
+                    args = {}
                 result = _call_tool(name, args)
                 tools_used.append(name)
                 messages.append({
-                    "role":    "tool",
-                    "name":    name,
-                    "content": json.dumps(result, default=str),
+                    "role":         "tool",
+                    "tool_call_id": call.id,
+                    "content":      json.dumps(result, default=str),
                 })
-    except ConnectionError as e:
-        return _error_response(
-            f"Could not reach Ollama at `{HOST}`. Start it with `ollama serve` "
-            f"and pull the model with `ollama pull {MODEL}`. ({e})",
-            tools_used,
-        )
-    except ollama.ResponseError as e:
-        msg = str(e)
-        hint = f" Try `ollama pull {MODEL}`." if "not found" in msg.lower() else ""
-        return _error_response(f"Ollama error: {msg}.{hint}", tools_used)
     except Exception as e:  # noqa: BLE001
-        return _error_response(f"Unexpected error: {type(e).__name__}: {e}", tools_used)
+        hint = ""
+        if PROVIDER == "groq":
+            hint = (f" Check that GROQ_API_KEY is valid and that '{MODEL}' is "
+                    "still listed at https://console.groq.com/docs/models.")
+        elif PROVIDER == "openai":
+            hint = " Check OPENAI_API_KEY and your account quota."
+        elif PROVIDER == "ollama":
+            hint = (f" Make sure `ollama serve` is running at {BASE_URL} "
+                    f"and the model is pulled: `ollama pull {MODEL}`.")
+        return _error_response(f"{type(e).__name__}: {e}.{hint}", tools_used)
 
     return _error_response(
         "Hit the tool-call budget without composing an answer. Try rephrasing.",
@@ -602,5 +646,6 @@ def _error_response(message: str, tools_used: list[str]) -> dict:
         "tools_used": tools_used,
         "rounds":     len(tools_used),
         "model":      MODEL,
+        "provider":   PROVIDER,
         "error":      True,
     }
